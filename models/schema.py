@@ -232,6 +232,25 @@ class SmartMoneyBuy(Base):
     is_holding = Column(Boolean, default=True)     # still holding at detection time
 
 
+class CalibrationWeight(Base):
+    """
+    Stores the most recent signal weight calibration produced by the LearningAgent.
+    Only the latest row is used — older rows are kept for audit trail.
+    """
+    __tablename__ = "calibration_weights"
+    id = Column(Integer, primary_key=True)
+    calibrated_at = Column(DateTime, default=datetime.utcnow)
+    trade_count = Column(Integer, default=0)       # trades used for calibration
+    base_win_rate = Column(Float, default=0.0)     # overall win rate in sample
+    # Calibrated weights for each signal category (should sum to ~100)
+    smart_money_buy = Column(Float)
+    elite_trader = Column(Float)
+    vetting_pass = Column(Float)
+    whale_accumulation = Column(Float)
+    strategy_confirm = Column(Float)
+    positive_sentiment = Column(Float)
+
+
 # ── Indexes for time-series query performance ─────────────────────────────────
 # Without these, dashboard queries do full table scans once rows reach ~100k+
 

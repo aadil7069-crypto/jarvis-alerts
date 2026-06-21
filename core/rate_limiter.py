@@ -19,6 +19,7 @@ _LIMITS: dict[str, tuple[int, int]] = {
     "api.anthropic.com":          (10, 60),
     "gmgn.ai":                    (20, 60),   # undocumented public API — keep conservative
     "public-api.birdeye.so":      (30, 60),   # free tier: 100 req/min documented
+    "api.arkhamintelligence.com": (10, 60),   # conservative — free tier limits unknown
 }
 
 

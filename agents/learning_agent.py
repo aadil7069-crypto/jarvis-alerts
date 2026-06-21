@@ -4,6 +4,8 @@ import logging
 import os
 import re
 from agents.base_agent import BaseAgent
+from core import calibrator
+from core.scoring import set_calibrated_weights
 from models.schema import Trade, Token, Signal, TokenVetting, Lesson
 
 logger = logging.getLogger("jarvis.learning")
@@ -59,11 +61,15 @@ class LearningAgent(BaseAgent):
 
         if not pending:
             self.logger.info("No new closed trades to analyse")
-            return
+        else:
+            self.logger.info(f"Running post-mortems on {len(pending)} closed trade(s)")
+            for trade in pending:
+                await self._post_mortem(trade)
 
-        self.logger.info(f"Running post-mortems on {len(pending)} closed trade(s)")
-        for trade in pending:
-            await self._post_mortem(trade)
+        # Run calibration after every learning cycle (regardless of new trades)
+        weights = calibrator.calibrate(self._session_factory)
+        if weights:
+            set_calibrated_weights(weights)
 
     async def _post_mortem(self, trade: Trade) -> None:
         loop = asyncio.get_running_loop()

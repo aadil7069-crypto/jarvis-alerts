@@ -19,6 +19,7 @@ from datetime import datetime, timedelta, timezone
 
 from agents.base_agent import BaseAgent
 from core.rate_limiter import acquire as rate_limit
+from data.arkham import get_entity_label
 from data.birdeye import get_top_traders, get_token_price
 from data.helius import get_transactions
 from models.schema import Signal, Token, WalletScore, Watchlist, SmartMoneyBuy
@@ -33,6 +34,7 @@ class EliteTraderAgent(BaseAgent):
         super().__init__(name, message_bus, session_factory, config)
         self._elite_wallets: list[dict] = []   # refreshed each tick
         self._tick_count = 0
+        self._arkham_cache: dict[str, str | None] = {}
 
     async def run(self) -> None:
         self._tick_count += 1
@@ -127,10 +129,20 @@ class EliteTraderAgent(BaseAgent):
                     if not addr:
                         continue
                     score = min(99.0, _ELITE_SCORE + t.get("pnl", 0) / 1000)
+                    label = "elite"
+                    if addr not in self._arkham_cache:
+                        arkham_label = get_entity_label(addr)
+                        self._arkham_cache[addr] = arkham_label
+                        if arkham_label:
+                            label = arkham_label
+                            self.logger.info(f"Arkham: elite wallet {addr[:8]} is '{arkham_label}'")
+                    elif self._arkham_cache.get(addr):
+                        label = self._arkham_cache[addr]
+
                     row = db.query(WalletScore).filter_by(address=addr).first()
                     if row:
                         row.score = max(row.score, score)
-                        row.label = "elite"
+                        row.label = label
                         row.source = "birdeye"
                         row.win_rate_7d = t.get("win_rate", 0) or 0
                         row.trade_count_7d = t.get("trade_count", 0) or 0

@@ -21,6 +21,25 @@ WEIGHTS = {
 
 assert sum(WEIGHTS.values()) == 100, "Weights must sum to 100"
 
+# Calibrated weights override WEIGHTS when set by the LearningAgent.
+# None = base WEIGHTS are used (default until enough trade history exists).
+_calibrated_weights: dict | None = None
+
+
+def set_calibrated_weights(weights: dict) -> None:
+    """Activate calibrated weights produced by core/calibrator.py."""
+    global _calibrated_weights
+    _calibrated_weights = weights
+    logger.info(
+        "Calibrated weights activated: "
+        + " ".join(f"{k}={v:.1f}" for k, v in weights.items())
+    )
+
+
+def get_active_weights() -> dict:
+    """Return calibrated weights if available, otherwise base WEIGHTS."""
+    return _calibrated_weights if _calibrated_weights is not None else WEIGHTS
+
 
 def compute_score(
     vetting_passed: bool,
@@ -43,13 +62,14 @@ def compute_score(
     def _clamp(v: float) -> float:
         return min(1.0, max(0.0, v))
 
+    w = get_active_weights()
     breakdown = {
-        "vetting_pass":       WEIGHTS["vetting_pass"] if vetting_passed else 0,
-        "smart_money_buy":    round(WEIGHTS["smart_money_buy"]    * _clamp(smart_money_strength)),
-        "elite_trader":       round(WEIGHTS["elite_trader"]       * _clamp(elite_trader_strength)),
-        "whale_accumulation": round(WEIGHTS["whale_accumulation"] * _clamp(whale_strength)),
-        "positive_sentiment": round(WEIGHTS["positive_sentiment"] * _clamp(sentiment_strength)),
-        "strategy_confirm":   round(WEIGHTS["strategy_confirm"]   * _clamp(strategy_strength)),
+        "vetting_pass":       w["vetting_pass"] if vetting_passed else 0,
+        "smart_money_buy":    round(w["smart_money_buy"]    * _clamp(smart_money_strength)),
+        "elite_trader":       round(w["elite_trader"]       * _clamp(elite_trader_strength)),
+        "whale_accumulation": round(w["whale_accumulation"] * _clamp(whale_strength)),
+        "positive_sentiment": round(w["positive_sentiment"] * _clamp(sentiment_strength)),
+        "strategy_confirm":   round(w["strategy_confirm"]   * _clamp(strategy_strength)),
     }
 
     base_score = sum(breakdown.values())

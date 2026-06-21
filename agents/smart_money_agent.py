@@ -19,6 +19,7 @@ from datetime import datetime, timedelta, timezone
 
 from agents.base_agent import BaseAgent
 from core.rate_limiter import acquire as rate_limit
+from data.arkham import get_entity_label
 from data.gmgn import (
     get_smart_money_wallets,
     get_token_smart_money_activity,
@@ -43,6 +44,7 @@ class SmartMoneyAgent(BaseAgent):
         super().__init__(name, message_bus, session_factory, config)
         self._gmgn_wallet_cache: list[dict] = []   # refreshed every 4 ticks
         self._tick_count = 0
+        self._arkham_cache: dict[str, str | None] = {}  # address → label, avoids repeat lookups
 
     async def run(self) -> None:
         self._tick_count += 1
@@ -213,6 +215,18 @@ class SmartMoneyAgent(BaseAgent):
                     if not addr:
                         continue
                     score = self._compute_score(w)
+                    # Arkham enrichment: look up entity name for high-scoring wallets
+                    # Use in-memory cache to avoid redundant API calls per session
+                    label = w.get("wallet_label") or "smart_degen"
+                    if score >= 65 and addr not in self._arkham_cache:
+                        arkham_label = get_entity_label(addr)
+                        self._arkham_cache[addr] = arkham_label
+                        if arkham_label:
+                            label = arkham_label
+                            self.logger.info(f"Arkham: {addr[:8]} identified as '{arkham_label}'")
+                    elif addr in self._arkham_cache and self._arkham_cache[addr]:
+                        label = self._arkham_cache[addr]
+
                     row = db.query(WalletScore).filter_by(address=addr).first()
                     if row:
                         row.score = score
@@ -220,14 +234,14 @@ class SmartMoneyAgent(BaseAgent):
                         row.realized_pnl_7d = w.get("realized_pnl_7d", 0) or 0
                         row.trade_count_7d = w.get("trade_count", 0) or 0
                         row.avg_trade_size_usd = w.get("avg_trade_size_usd", 0) or 0
-                        row.label = w.get("wallet_label")
+                        row.label = label
                         row.source = source
                         row.updated_at = datetime.now(timezone.utc)
                     else:
                         db.add(WalletScore(
                             address=addr,
                             chain="solana",
-                            label=w.get("wallet_label"),
+                            label=label,
                             source=source,
                             score=score,
                             win_rate_7d=w.get("win_rate", 0) or 0,

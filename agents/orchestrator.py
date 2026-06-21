@@ -27,7 +27,9 @@ class Orchestrator(BaseAgent):
         self.circuit_breaker = circuit_breaker
         self._confidence_modifier: int = 0     # from prediction market agent
         self._safe_mode: str = "normal"        # from prediction market agent
-        self._position_multiplier: float = 1.0
+        self._position_multiplier: float = 1.0 # from prediction market safe-mode
+        self._regime: str = "unknown"          # from regime agent
+        self._regime_multiplier: float = 0.7   # conservative until first regime update
         self._max_positions: int = config.get("trading", {}).get("max_concurrent_positions", 5)
 
     # ── Tick ──────────────────────────────────────────────────────────────────
@@ -47,7 +49,8 @@ class Orchestrator(BaseAgent):
 
         self.logger.info(
             f"Orchestrator tick | Open: {open_count}/{self._max_positions} | "
-            f"Mode: {self._safe_mode.upper()} | PM modifier: {self._confidence_modifier:+d}"
+            f"Mode: {self._safe_mode.upper()} | Regime: {self._regime.upper()} | "
+            f"PM modifier: {self._confidence_modifier:+d}"
         )
 
         watchlist = self._get_watchlist_tokens()
@@ -152,7 +155,8 @@ class Orchestrator(BaseAgent):
 
     async def _create_trade_idea(self, token: Token, scored: dict) -> None:
         base_size_pct = self.config.get("trading", {}).get("max_position_size_pct", 0.05)
-        adjusted_size_pct = base_size_pct * self._position_multiplier
+        # Compound PM safe-mode multiplier with market regime multiplier
+        adjusted_size_pct = base_size_pct * self._position_multiplier * self._regime_multiplier
 
         breakdown_json = json.dumps(scored["breakdown"])
 
@@ -181,7 +185,7 @@ class Orchestrator(BaseAgent):
             f"PM {self._confidence_modifier:+d}) | "
             f"Agents: {scored['agents_bullish']} | "
             f"Size: {adjusted_size_pct:.1%} | "
-            f"Mode: {self._safe_mode.upper()}"
+            f"Mode: {self._safe_mode.upper()} | Regime: {self._regime.upper()}"
         )
 
         await self.publish("trade_idea", {
@@ -243,6 +247,17 @@ class Orchestrator(BaseAgent):
                 f"{len(triggers)} trigger(s) | "
                 f"Position multiplier: {self._position_multiplier:.0%}"
             )
+
+        elif msg_type == "regime_update":
+            payload = message.get("payload", {})
+            old = self._regime
+            self._regime = payload.get("regime", "unknown")
+            self._regime_multiplier = payload.get("position_multiplier", 0.7)
+            if self._regime != old:
+                self.logger.info(
+                    f"Regime updated: {old.upper()} → {self._regime.upper()} | "
+                    f"size multiplier: {self._regime_multiplier:.0%}"
+                )
 
         elif msg_type == "kill_switch":
             self.circuit_breaker.trigger("Kill switch activated")

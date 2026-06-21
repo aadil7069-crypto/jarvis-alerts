@@ -22,6 +22,7 @@ from agents.portfolio_agent import PortfolioAgent
 from agents.learning_agent import LearningAgent
 from agents.reporting_agent import ReportingAgent
 from agents.prediction_market_agent import PredictionMarketAgent
+from agents.regime_agent import RegimeAgent
 
 
 async def _run_agent_safely(agent, logger: logging.Logger) -> None:
@@ -77,6 +78,7 @@ async def main() -> None:
         LearningAgent("learning",            bus, db_factory, config),
         ReportingAgent("reporting",          bus, db_factory, config),
         PredictionMarketAgent("prediction_market", bus, db_factory, config),
+        RegimeAgent("regime",                bus, db_factory, config),
     ]
 
     logger.info(f"Starting {len(agents)} agents with crash isolation...")

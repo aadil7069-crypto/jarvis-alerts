@@ -3,7 +3,9 @@
     "allow": [
       "PowerShell(New-Item *)",
       "PowerShell($env:PATH += \";C:\\\\Program Files\\\\Git\\\\cmd\"; cd C:\\\\Users\\\\aadil\\\\jarvis-alerts; git status)",
-      "PowerShell(git *)"
+      "PowerShell(git *)",
+      "PowerShell($env:PATH += \";C:\\\\Program Files\\\\Git\\\\cmd\"; cd C:\\\\Users\\\\aadil\\\\jarvis-alerts; git remote -v)",
+      "PowerShell($env:PATH += \";C:\\\\Program Files\\\\Git\\\\cmd\"; cd C:\\\\Users\\\\aadil\\\\jarvis-alerts; python -m pytest tests/ -v --tb=short 2>&1 | Select-Object -Last 60)"
     ]
   }
 }

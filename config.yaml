@@ -90,6 +90,8 @@ agents:
     interval_seconds: 86400
   prediction_market:
     interval_seconds: 300
+  regime:
+    interval_seconds: 300
 
 prediction_markets:
   enabled: true

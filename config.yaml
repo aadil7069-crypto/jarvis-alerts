@@ -46,6 +46,13 @@ intelligence:
     trade_history: 0.15
     trade_size: 0.15
 
+execution:
+  # On-chain execution settings (Phase 7 — live mode only)
+  slippage_bps: 50                # 0.5% slippage tolerance on Jupiter/PancakeSwap
+  # solana_rpc_url and bnb_rpc_url are built from env vars at runtime:
+  #   Solana: https://mainnet.helius-rpc.com/?api-key=<HELIUS_API_KEY>
+  #   BNB:    BNB_RPC_URL env var (or https://bsc-dataseed.binance.org/ default)
+
 maintenance:
   data_retention_days: 30         # Delete time-series records older than this
 

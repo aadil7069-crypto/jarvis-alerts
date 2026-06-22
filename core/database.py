@@ -6,6 +6,7 @@ from models.schema import Base
 # databases don't lose data on upgrade.
 _MIGRATIONS = [
     "ALTER TABLE trades ADD COLUMN high_price REAL",
+    "ALTER TABLE trades ADD COLUMN tx_signature TEXT",
 ]
 
 

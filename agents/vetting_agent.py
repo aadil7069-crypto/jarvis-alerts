@@ -1,7 +1,7 @@
 import asyncio
 import json
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from agents.base_agent import BaseAgent
 from core.rate_limiter import acquire as rate_limit
 from data.dexscreener import get_token, extract_token_info
@@ -52,7 +52,7 @@ class VettingAgent(BaseAgent):
             with self.get_db() as db:
                 from sqlalchemy import text
                 from datetime import timedelta
-                cutoff = datetime.utcnow() - timedelta(hours=24)
+                cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
                 token = db.query(Token).filter_by(address=address).first()
                 if not token:
                     return False

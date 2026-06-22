@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, relationship
 
@@ -14,8 +14,8 @@ class Token(Base):
     symbol = Column(String)
     name = Column(String)
     chain = Column(String)  # solana | bnb
-    first_seen = Column(DateTime, default=datetime.utcnow)
-    last_updated = Column(DateTime, default=datetime.utcnow)
+    first_seen = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    last_updated = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     vettings = relationship("TokenVetting", back_populates="token")
     signals = relationship("Signal", back_populates="token")
 
@@ -24,7 +24,7 @@ class TokenVetting(Base):
     __tablename__ = "token_vettings"
     id = Column(Integer, primary_key=True)
     token_id = Column(Integer, ForeignKey("tokens.id"))
-    checked_at = Column(DateTime, default=datetime.utcnow)
+    checked_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     contract_safe = Column(Boolean)
     is_honeypot = Column(Boolean)
     liquidity_usd = Column(Float)
@@ -39,7 +39,7 @@ class Watchlist(Base):
     __tablename__ = "watchlist"
     id = Column(Integer, primary_key=True)
     token_id = Column(Integer, ForeignKey("tokens.id"))
-    added_at = Column(DateTime, default=datetime.utcnow)
+    added_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     added_by = Column(String)
     status = Column(String, default="watching")  # watching | promoted | rejected
     notes = Column(Text)
@@ -53,7 +53,7 @@ class Signal(Base):
     signal_type = Column(String)  # bullish | bearish | neutral | warning
     strength = Column(Float)      # 0-100
     reason = Column(Text)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     expires_at = Column(DateTime, nullable=True)
     token = relationship("Token", back_populates="signals")
 
@@ -62,7 +62,7 @@ class TradeIdea(Base):
     __tablename__ = "trade_ideas"
     id = Column(Integer, primary_key=True)
     token_id = Column(Integer, ForeignKey("tokens.id"))
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     confidence_score = Column(Float)   # 0-100
     agents_bullish = Column(Integer)
     score_breakdown = Column(Text)     # JSON
@@ -82,12 +82,13 @@ class Trade(Base):
     exit_price = Column(Float, nullable=True)
     high_price = Column(Float, nullable=True)   # peak price seen since entry (for trailing stop)
     size_usd = Column(Float)
-    opened_at = Column(DateTime, default=datetime.utcnow)
+    opened_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     closed_at = Column(DateTime, nullable=True)
     pnl_usd = Column(Float, nullable=True)
     pnl_pct = Column(Float, nullable=True)
     status = Column(String, default="open")  # open | closed | cancelled
     exit_reason = Column(String, nullable=True)  # take_profit | stop_loss | trailing_stop | rug_detected | manual | timeout
+    tx_signature = Column(String, nullable=True)  # on-chain tx hash/sig (live trades only)
 
 
 class AgentMessage(Base):
@@ -97,14 +98,14 @@ class AgentMessage(Base):
     to_agent = Column(String)
     message_type = Column(String)
     payload = Column(Text)  # JSON
-    sent_at = Column(DateTime, default=datetime.utcnow)
+    sent_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     processed = Column(Boolean, default=False)
 
 
 class Performance(Base):
     __tablename__ = "performance"
     id = Column(Integer, primary_key=True)
-    date = Column(DateTime, default=datetime.utcnow)
+    date = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     is_paper = Column(Boolean, default=True)
     total_trades = Column(Integer, default=0)
     winning_trades = Column(Integer, default=0)
@@ -118,7 +119,7 @@ class Performance(Base):
 class Lesson(Base):
     __tablename__ = "lessons"
     id = Column(Integer, primary_key=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     trade_id = Column(Integer, ForeignKey("trades.id"), nullable=True)
     lesson_type = Column(String)  # win | loss | near_miss
     what_worked = Column(Text, nullable=True)
@@ -138,8 +139,8 @@ class PredictionMarket(Base):
     market_type = Column(String)   # crypto | macro | regulatory | other
     end_date = Column(String, nullable=True)
     volume = Column(Float, default=0.0)
-    first_seen = Column(DateTime, default=datetime.utcnow)
-    last_updated = Column(DateTime, default=datetime.utcnow)
+    first_seen = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    last_updated = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     probabilities = relationship("MarketProbability", back_populates="market")
     events = relationship("MarketEvent", back_populates="market")
 
@@ -148,7 +149,7 @@ class MarketProbability(Base):
     __tablename__ = "market_probabilities"
     id = Column(Integer, primary_key=True)
     market_id = Column(String, ForeignKey("prediction_markets.market_id"), nullable=False)
-    recorded_at = Column(DateTime, default=datetime.utcnow)
+    recorded_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     yes_probability = Column(Float, nullable=False)
     volume = Column(Float, default=0.0)
     market = relationship("PredictionMarket", back_populates="probabilities")
@@ -158,7 +159,7 @@ class MarketEvent(Base):
     __tablename__ = "market_events"
     id = Column(Integer, primary_key=True)
     market_id = Column(String, ForeignKey("prediction_markets.market_id"), nullable=False)
-    detected_at = Column(DateTime, default=datetime.utcnow)
+    detected_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     event_type = Column(String)        # probability_shift | approaching_resolution
     old_probability = Column(Float)
     new_probability = Column(Float)
@@ -171,7 +172,7 @@ class MarketEvent(Base):
 class MacroRiskState(Base):
     __tablename__ = "macro_risk_states"
     id = Column(Integer, primary_key=True)
-    recorded_at = Column(DateTime, default=datetime.utcnow)
+    recorded_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     sentiment = Column(String)          # bullish | bearish | neutral | risk_off
     sentiment_score = Column(Float)
     confidence_modifier = Column(Integer)
@@ -185,7 +186,7 @@ class MacroRiskState(Base):
 class PaperPortfolio(Base):
     __tablename__ = "paper_portfolio"
     id = Column(Integer, primary_key=True)
-    updated_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     cash_balance = Column(Float, nullable=False)
     total_invested = Column(Float, default=0.0)
     total_value = Column(Float, nullable=False)
@@ -210,9 +211,9 @@ class WalletScore(Base):
     realized_pnl_7d = Column(Float, default=0.0)  # USD profit in last 7 days
     avg_trade_size_usd = Column(Float, default=0.0)
     last_active = Column(DateTime, nullable=True)
-    updated_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     score = Column(Float, default=50.0)            # 0-100 computed quality score
-    first_seen = Column(DateTime, default=datetime.utcnow)
+    first_seen = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class SmartMoneyBuy(Base):
@@ -228,7 +229,7 @@ class SmartMoneyBuy(Base):
     wallet_score = Column(Float, default=50.0)
     source = Column(String)                        # gmgn | helius | birdeye
     buy_amount_usd = Column(Float, nullable=True)
-    detected_at = Column(DateTime, default=datetime.utcnow)
+    detected_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     tx_signature = Column(String, nullable=True)
     is_holding = Column(Boolean, default=True)     # still holding at detection time
 
@@ -240,7 +241,7 @@ class CalibrationWeight(Base):
     """
     __tablename__ = "calibration_weights"
     id = Column(Integer, primary_key=True)
-    calibrated_at = Column(DateTime, default=datetime.utcnow)
+    calibrated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     trade_count = Column(Integer, default=0)       # trades used for calibration
     base_win_rate = Column(Float, default=0.0)     # overall win rate in sample
     # Calibrated weights for each signal category (should sum to ~100)

@@ -1,36 +1,53 @@
 import asyncio
+import os
 from datetime import datetime, timedelta, timezone
 from agents.base_agent import BaseAgent
 from core.rate_limiter import acquire as rate_limit
 from data.dexscreener import get_token, extract_token_info
+from data.jupiter import get_quote as jupiter_quote, execute_swap as jupiter_execute
+from data.jupiter import USDC_MINT as _USDC_MINT
+from data.pancakeswap import get_quote as pancake_quote, execute_swap as pancake_execute
+from data.pancakeswap import WBNB_ADDRESS as _WBNB
 from models.schema import Trade, TradeIdea, Token, PaperPortfolio
 
 
 class ExecutionAgent(BaseAgent):
     """
-    Paper trade lifecycle manager.
+    Trade lifecycle manager — paper and live modes.
 
-    Opening  — triggered by "trade_idea" message from Orchestrator:
-                fetch live price → create Trade record → publish trade_opened
+    Paper mode  (mode == "paper"):
+      Opening  — fetch quote price from Jupiter/PancakeSwap (with price impact),
+                 fall back to DexScreener; create Trade record; publish trade_opened
+      Monitoring — check stop-loss / trailing-stop / take-profit / timeout each tick
 
-    Monitoring — each run() tick:
-                fetch current price → check stop-loss / take-profit / timeout
-                → close position and publish trade_closed
+    Live mode (mode == "live"):
+      Opening  — same quote fetch, then broadcast swap on-chain via Jupiter/PancakeSwap;
+                 store tx_signature in Trade record
+      Monitoring — same exit logic as paper mode
 
-    SAFETY: only paper trades while mode == "paper".
-            live execution is Phase 6, gated behind circuit breaker + mode check.
+    SAFETY:
+      • mode gate hardcoded in _open_trade()
+      • circuit breaker checked before every action
+      • private keys only ever read from env vars, never stored
     """
 
     def __init__(self, name, message_bus, session_factory, circuit_breaker, config):
         super().__init__(name, message_bus, session_factory, config)
         self.circuit_breaker = circuit_breaker
         trading = config.get("trading", {})
-        self._stop_loss_pct = trading.get("stop_loss_pct", -0.08)
-        self._take_profit_pct = trading.get("take_profit_pct", 0.25)
+        self._stop_loss_pct     = trading.get("stop_loss_pct", -0.08)
+        self._take_profit_pct   = trading.get("take_profit_pct", 0.25)
         self._trailing_stop_pct = trading.get("trailing_stop_pct", 0.15)
-        self._max_hold_hours = trading.get("max_hold_hours", 48)
-        self._starting_balance = trading.get("paper_balance", 10_000.0)
-        self._max_position_pct = trading.get("max_position_size_pct", 0.05)
+        self._max_hold_hours    = trading.get("max_hold_hours", 48)
+        self._starting_balance  = trading.get("paper_balance", 10_000.0)
+        self._max_position_pct  = trading.get("max_position_size_pct", 0.05)
+        execution = config.get("execution", {})
+        self._slippage_bps = execution.get("slippage_bps", 50)
+        self._solana_rpc   = (
+            execution.get("solana_rpc_url")
+            or f"https://mainnet.helius-rpc.com/?api-key={os.getenv('HELIUS_API_KEY', '')}"
+        )
+        self._bnb_rpc = execution.get("bnb_rpc_url") or os.getenv("BNB_RPC_URL", "")
 
     # ── Monitoring tick ───────────────────────────────────────────────────────
 
@@ -62,15 +79,13 @@ class ExecutionAgent(BaseAgent):
             if reason:
                 await self._close_trade(trade, current_price, reason)
 
-    # ── Open trade ────────────────────────────────────────────────────────────
+    # ── Open trade (paper + live) ─────────────────────────────────────────────
 
-    async def _open_paper_trade(self, idea: dict) -> None:
-        if self.config.get("system", {}).get("mode", "paper") != "paper":
-            self.logger.warning("Not in paper mode — trade opening blocked")
-            return
-
-        address = idea.get("address")
-        token_id = idea.get("token_id")
+    async def _open_trade(self, idea: dict) -> None:
+        mode = self.config.get("system", {}).get("mode", "paper")
+        address   = idea.get("address")
+        chain     = idea.get("chain", "solana")
+        token_id  = idea.get("token_id")
         trade_idea_id = idea.get("trade_idea_id")
         symbol = idea.get("symbol") or (address[:8] if address else "UNKNOWN")
 
@@ -82,50 +97,50 @@ class ExecutionAgent(BaseAgent):
             self.logger.info(f"Already holding {symbol} — duplicate position blocked")
             return
 
-        loop = asyncio.get_running_loop()
-        await rate_limit("api.dexscreener.com")
-        pair = await loop.run_in_executor(None, lambda: get_token(address))
-        if not pair:
-            self.logger.warning(f"DexScreener returned no pair for {symbol} — trade aborted")
-            return
-
-        entry_price = extract_token_info(pair).get("price_usd") or 0
-        if entry_price <= 0:
-            self.logger.warning(f"Zero price returned for {symbol} — trade aborted")
-            return
-
         size_usd = self._compute_position_size(idea)
+
+        # ── Fetch entry price (always; live also executes swap) ───────────────
+        entry_price, tx_sig = await self._fetch_price_and_maybe_execute(
+            address, chain, size_usd, mode, loop=asyncio.get_running_loop()
+        )
+        if entry_price <= 0:
+            self.logger.warning(f"Could not get entry price for {symbol} — trade aborted")
+            return
+
+        is_paper = (mode != "live") or (tx_sig is None and mode == "live")
 
         try:
             with self.get_db() as db:
                 trade = Trade(
                     trade_idea_id=trade_idea_id,
                     token_id=token_id,
-                    is_paper=True,
+                    is_paper=(mode == "paper"),
                     direction=idea.get("direction", "buy"),
                     entry_price=entry_price,
                     size_usd=size_usd,
                     opened_at=datetime.now(timezone.utc),
                     status="open",
+                    tx_signature=tx_sig,
                 )
                 db.add(trade)
                 db.flush()
                 trade_id = trade.id
 
-                # Mark the trade idea as executed
                 if trade_idea_id:
                     ti = db.query(TradeIdea).filter_by(id=trade_idea_id).first()
                     if ti:
                         ti.status = "executed"
 
         except Exception as e:
-            self.logger.error(f"Failed to record paper trade for {symbol}: {e}")
+            self.logger.error(f"Failed to record trade for {symbol}: {e}")
             return
 
+        mode_tag = "LIVE" if mode == "live" else "PAPER"
+        tx_info = f" | tx: {tx_sig[:16]}..." if tx_sig else ""
         self.logger.info(
-            f"PAPER TRADE OPENED | {symbol} | "
+            f"{mode_tag} TRADE OPENED | {symbol} | "
             f"Entry: ${entry_price:.6g} | Size: ${size_usd:,.2f} | "
-            f"ID: {trade_id} | Score: {idea.get('confidence_score')}/100"
+            f"ID: {trade_id} | Score: {idea.get('confidence_score')}/100{tx_info}"
         )
 
         await self.publish("trade_opened", {
@@ -134,11 +149,83 @@ class ExecutionAgent(BaseAgent):
             "token_id": token_id,
             "address": address,
             "symbol": symbol,
-            "chain": idea.get("chain"),
+            "chain": chain,
             "entry_price": entry_price,
             "size_usd": size_usd,
             "confidence_score": idea.get("confidence_score"),
+            "tx_signature": tx_sig,
+            "mode": mode,
         })
+
+    async def _fetch_price_and_maybe_execute(
+        self, address: str, chain: str, size_usd: float, mode: str, loop
+    ) -> tuple[float, str | None]:
+        """
+        Fetch the best available entry price and, in live mode, execute the swap.
+
+        Returns (entry_price_usd, tx_signature_or_None).
+        """
+        # ── Get quote (DEX aggregator for best price accuracy) ────────────────
+        entry_price = 0.0
+        tx_sig = None
+
+        if chain == "solana":
+            await rate_limit("quote-api.jup.ag")
+            usdc_units = int(size_usd * 1_000_000)
+            quote = await loop.run_in_executor(
+                None, lambda: jupiter_quote(_USDC_MINT, address, usdc_units, self._slippage_bps)
+            )
+            if quote and quote.get("out_amount") and quote.get("in_amount"):
+                tokens_out = quote["out_amount"]
+                if tokens_out > 0:
+                    # price = USD spent / tokens received (raw units; approximates at 9 decimals)
+                    entry_price = (quote["in_amount"] / 1_000_000) / (tokens_out / 1e9)
+                if mode == "live" and entry_price > 0:
+                    result = await loop.run_in_executor(
+                        None, lambda q=quote: jupiter_execute(q, self._solana_rpc)
+                    )
+                    if result.get("status") == "broadcast":
+                        tx_sig = result.get("tx_signature")
+                    else:
+                        self.logger.error(f"Jupiter live swap failed: {result.get('error')}")
+                        return 0.0, None
+
+        elif chain in ("bnb", "bsc"):
+            await rate_limit("bsc-dataseed.binance.org")
+            bnb_units = int((size_usd / 300) * 1e18)  # rough BNB conversion
+            quote = await loop.run_in_executor(
+                None, lambda: pancake_quote(_WBNB, address, bnb_units, rpc_url=self._bnb_rpc)
+            )
+            if quote and quote.get("amount_out"):
+                tokens_out = quote["amount_out"]
+                if tokens_out > 0:
+                    entry_price = (bnb_units / 1e18 * 300) / (tokens_out / 1e18)
+                if mode == "live" and entry_price > 0:
+                    result = await loop.run_in_executor(
+                        None,
+                        lambda q=quote: pancake_execute(
+                            _WBNB, address, bnb_units,
+                            q.get("min_amount_out", 0),
+                            q.get("fee_tier", 500),
+                            rpc_url=self._bnb_rpc,
+                        )
+                    )
+                    if result.get("status") == "broadcast":
+                        tx_sig = result.get("tx_hash")
+                    else:
+                        self.logger.error(f"PancakeSwap live swap failed: {result.get('error')}")
+                        return 0.0, None
+
+        # ── Fall back to DexScreener if quote failed ──────────────────────────
+        if entry_price <= 0:
+            await rate_limit("api.dexscreener.com")
+            pair = await loop.run_in_executor(None, lambda: get_token(address))
+            if pair:
+                entry_price = extract_token_info(pair).get("price_usd") or 0.0
+            if entry_price <= 0:
+                return 0.0, None
+
+        return entry_price, tx_sig
 
     # ── Close trade ───────────────────────────────────────────────────────────
 
@@ -325,7 +412,7 @@ class ExecutionAgent(BaseAgent):
             if not self.circuit_breaker.trading_allowed:
                 self.logger.warning("Trade blocked — circuit breaker is active")
                 return
-            await self._open_paper_trade(message.get("payload", {}))
+            await self._open_trade(message.get("payload", {}))
 
         elif msg_type == "token_vetted":
             payload = message.get("payload", {})

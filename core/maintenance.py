@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from models.schema import MarketProbability, MacroRiskState, AgentMessage, Signal
 
@@ -16,7 +16,7 @@ def prune_old_data(session_factory, retention_days: int = 30) -> None:
     """
     db = session_factory()
     try:
-        cutoff = datetime.utcnow() - timedelta(days=retention_days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
 
         mp = db.query(MarketProbability).filter(MarketProbability.recorded_at < cutoff).delete()
         mr = db.query(MacroRiskState).filter(MacroRiskState.recorded_at < cutoff).delete()

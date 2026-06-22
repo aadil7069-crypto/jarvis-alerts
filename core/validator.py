@@ -12,8 +12,9 @@ _WARNINGS = [
 ]
 
 _LIVE_REQUIRED = [
-    "EXCHANGE_API_KEY",
-    "EXCHANGE_API_SECRET",
+    "SOLANA_PRIVATE_KEY",    # Base58 Solana keypair — used by Jupiter for Solana swaps
+    "BNB_PRIVATE_KEY",       # Hex private key — used by PancakeSwap for BNB swaps
+    "BNB_WALLET_ADDRESS",    # Public BNB wallet address
 ]
 
 

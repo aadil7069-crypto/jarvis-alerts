@@ -20,6 +20,9 @@ _LIMITS: dict[str, tuple[int, int]] = {
     "gmgn.ai":                    (20, 60),   # undocumented public API — keep conservative
     "public-api.birdeye.so":      (30, 60),   # free tier: 100 req/min documented
     "api.arkhamintelligence.com": (10, 60),   # conservative — free tier limits unknown
+    "quote-api.jup.ag":           (20, 60),   # Jupiter v6 quote API (public, no key)
+    "price.jup.ag":               (20, 60),   # Jupiter price API
+    "bsc-dataseed.binance.org":   (20, 60),   # Public BSC RPC
 }
 
 

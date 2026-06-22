@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Callable, Dict, List
 
 logger = logging.getLogger("jarvis.message_bus")
@@ -22,7 +22,7 @@ class MessageBus:
             "to": to_agent,
             "type": message_type,
             "payload": payload,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         await self._queue.put(message)
         logger.debug(f"[BUS] {from_agent} -> {to_agent} | {message_type}")

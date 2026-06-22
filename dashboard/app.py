@@ -60,7 +60,7 @@ def status():
     return {
         "system": "Jarvis 360°",
         "mode": config["system"]["mode"].upper(),
-        "agents": 14,
+        "agents": 15,
         "notifications_enabled": config.get("notifications", {}).get("enabled", False),
         "prediction_markets_enabled": config.get("prediction_markets", {}).get("enabled", True),
     }

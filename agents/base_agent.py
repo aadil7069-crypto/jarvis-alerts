@@ -2,7 +2,7 @@ import asyncio
 import logging
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 
@@ -55,7 +55,7 @@ class BaseAgent(ABC):
         while self.running:
             try:
                 await self.run()
-                self.last_run = datetime.utcnow()
+                self.last_run = datetime.now(timezone.utc)
             except Exception as e:
                 self.logger.error(f"Unhandled error in run(): {e}", exc_info=True)
             await asyncio.sleep(self._interval)

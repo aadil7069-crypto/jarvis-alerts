@@ -27,6 +27,7 @@ class ExecutionAgent(BaseAgent):
         trading = config.get("trading", {})
         self._stop_loss_pct = trading.get("stop_loss_pct", -0.08)
         self._take_profit_pct = trading.get("take_profit_pct", 0.25)
+        self._trailing_stop_pct = trading.get("trailing_stop_pct", 0.15)
         self._max_hold_hours = trading.get("max_hold_hours", 48)
         self._starting_balance = trading.get("paper_balance", 10_000.0)
         self._max_position_pct = trading.get("max_position_size_pct", 0.05)
@@ -53,6 +54,9 @@ class ExecutionAgent(BaseAgent):
             await rate_limit("api.dexscreener.com")
             pair = await loop.run_in_executor(None, lambda a=address: get_token(a))
             current_price = extract_token_info(pair).get("price_usd") if pair else None
+
+            if current_price and current_price > 0:
+                self._update_high_price(trade, current_price)
 
             reason = self._check_exit_conditions(trade, current_price)
             if reason:
@@ -190,6 +194,21 @@ class ExecutionAgent(BaseAgent):
             "size_usd": trade.size_usd,
         })
 
+    # ── High-water mark tracking ──────────────────────────────────────────────
+
+    def _update_high_price(self, trade: Trade, current_price: float) -> None:
+        """Persist peak price for trailing stop calculation."""
+        peak = trade.high_price or trade.entry_price or 0
+        if current_price > peak:
+            try:
+                with self.get_db() as db:
+                    t = db.query(Trade).filter_by(id=trade.id).first()
+                    if t and t.status == "open":
+                        t.high_price = current_price
+                trade.high_price = current_price  # keep in-memory object in sync
+            except Exception as e:
+                self.logger.error(f"high_price update failed for trade {trade.id}: {e}")
+
     # ── Exit condition logic ──────────────────────────────────────────────────
 
     def _check_exit_conditions(self, trade: Trade, current_price: float | None) -> str | None:
@@ -209,8 +228,18 @@ class ExecutionAgent(BaseAgent):
 
         if pnl_pct <= self._stop_loss_pct:
             return "stop_loss"
-        if pnl_pct >= self._take_profit_pct:
-            return "take_profit"
+
+        # Once the trade has gone profitable the trailing stop takes over from
+        # the fixed take-profit, letting memecoins run beyond the initial target.
+        high = trade.high_price or trade.entry_price
+        if trade.direction == "buy" and high > trade.entry_price:
+            # Trailing stop active — fire if price retreated trailing_stop_pct from peak
+            if current_price < high * (1 - self._trailing_stop_pct):
+                return "trailing_stop"
+        else:
+            # No peak above entry yet (or short position) — use fixed take-profit
+            if pnl_pct >= self._take_profit_pct:
+                return "take_profit"
 
         return None
 
@@ -263,6 +292,22 @@ class ExecutionAgent(BaseAgent):
         except Exception:
             return None
 
+    def _get_token_id(self, address: str) -> int | None:
+        try:
+            with self.get_db() as db:
+                from models.schema import Token as _Token
+                token = db.query(_Token).filter_by(address=address).first()
+                return token.id if token else None
+        except Exception:
+            return None
+
+    def _get_open_trades_for_token(self, token_id: int) -> list:
+        try:
+            with self.get_db() as db:
+                return db.query(Trade).filter_by(token_id=token_id, status="open", is_paper=True).all()
+        except Exception:
+            return []
+
     def _get_token_symbol(self, token_id: int) -> str:
         try:
             with self.get_db() as db:
@@ -281,3 +326,35 @@ class ExecutionAgent(BaseAgent):
                 self.logger.warning("Trade blocked — circuit breaker is active")
                 return
             await self._open_paper_trade(message.get("payload", {}))
+
+        elif msg_type == "token_vetted":
+            payload = message.get("payload", {})
+            if not payload.get("passed", True):
+                await self._emergency_exit_on_rug(payload)
+
+    async def _emergency_exit_on_rug(self, payload: dict) -> None:
+        """Close any open position on a token that just failed re-vetting."""
+        address = payload.get("address")
+        fail_reasons = payload.get("fail_reasons", [])
+        # Only emergency-exit on hard failures (honeypot / sell tax) not just low liquidity
+        hard_failures = [r for r in fail_reasons if any(
+            kw in r for kw in ("honeypot", "mintable", "owner_can_change_balance", "sell_tax")
+        )]
+        if not hard_failures or not address:
+            return
+
+        token_id = self._get_token_id(address)
+        if token_id is None:
+            return
+
+        open_trades = self._get_open_trades_for_token(token_id)
+        if not open_trades:
+            return
+
+        sym = payload.get("symbol", address[:8])
+        self.logger.warning(
+            f"RUG DETECTED on held token {sym} — closing {len(open_trades)} position(s) | "
+            f"reasons: {hard_failures}"
+        )
+        for trade in open_trades:
+            await self._close_trade(trade, None, "rug_detected")

@@ -16,8 +16,9 @@ trading:
   min_confidence_score: 72        # Minimum score (0-100) to execute a trade
   min_agents_consensus: 3         # Minimum agents that must agree before a trade
   max_concurrent_positions: 5     # Never hold more than this many open positions
-  stop_loss_pct: -0.08            # Close position at -8% loss
+  stop_loss_pct: -0.08            # Close position at -8% loss (fixed, from entry)
   take_profit_pct: 0.25           # Close position at +25% gain
+  trailing_stop_pct: 0.15         # Trail 15% below peak price once position is profitable
   max_hold_hours: 48              # Auto-close any position after 48 hours
 
 intelligence:

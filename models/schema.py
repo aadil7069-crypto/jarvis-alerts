@@ -80,13 +80,14 @@ class Trade(Base):
     direction = Column(String)          # buy | sell
     entry_price = Column(Float)
     exit_price = Column(Float, nullable=True)
+    high_price = Column(Float, nullable=True)   # peak price seen since entry (for trailing stop)
     size_usd = Column(Float)
     opened_at = Column(DateTime, default=datetime.utcnow)
     closed_at = Column(DateTime, nullable=True)
     pnl_usd = Column(Float, nullable=True)
     pnl_pct = Column(Float, nullable=True)
     status = Column(String, default="open")  # open | closed | cancelled
-    exit_reason = Column(String, nullable=True)  # take_profit | stop_loss | manual | timeout
+    exit_reason = Column(String, nullable=True)  # take_profit | stop_loss | trailing_stop | rug_detected | manual | timeout
 
 
 class AgentMessage(Base):

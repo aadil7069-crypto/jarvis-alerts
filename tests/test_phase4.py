@@ -17,6 +17,7 @@ def _make_trade(
     size_usd: float = 500.0,
     opened_hours_ago: float = 1.0,
     status: str = "open",
+    high_price: float = None,
 ) -> MagicMock:
     trade = MagicMock()
     trade.id = 42
@@ -27,10 +28,11 @@ def _make_trade(
     trade.status = status
     trade.is_paper = True
     trade.opened_at = datetime.now(timezone.utc) - timedelta(hours=opened_hours_ago)
+    trade.high_price = high_price  # peak price seen since entry
     return trade
 
 
-def _make_agent(stop_loss=-0.08, take_profit=0.25, max_hold_hours=48) -> ExecutionAgent:
+def _make_agent(stop_loss=-0.08, take_profit=0.25, max_hold_hours=48, trailing_stop=0.15) -> ExecutionAgent:
     cb = MagicMock()
     cb.trading_allowed = True
     bus = MagicMock()
@@ -40,6 +42,7 @@ def _make_agent(stop_loss=-0.08, take_profit=0.25, max_hold_hours=48) -> Executi
         "trading": {
             "stop_loss_pct": stop_loss,
             "take_profit_pct": take_profit,
+            "trailing_stop_pct": trailing_stop,
             "max_hold_hours": max_hold_hours,
             "paper_balance": 10_000.0,
             "max_position_size_pct": 0.05,
@@ -55,6 +58,7 @@ def _make_agent(stop_loss=-0.08, take_profit=0.25, max_hold_hours=48) -> Executi
     agent._session_factory = session_factory
     agent._stop_loss_pct = stop_loss
     agent._take_profit_pct = take_profit
+    agent._trailing_stop_pct = trailing_stop
     agent._max_hold_hours = max_hold_hours
     agent._starting_balance = 10_000.0
     agent._max_position_pct = 0.05
@@ -230,3 +234,119 @@ def test_daily_stats_best_worst():
     pnl_values = [100.0, -30.0, 50.0, -10.0]
     assert max(pnl_values) == 100.0
     assert min(pnl_values) == -30.0
+
+
+# ── Trailing stop ─────────────────────────────────────────────────────────────
+
+def test_trailing_stop_triggers_after_runup():
+    """Token went 2x then dropped 17% from peak (past 15% trail) — trailing stop fires."""
+    agent = _make_agent(trailing_stop=0.15)
+    # entry=1.00, high=2.00, current=1.65 → dropped 17.5% from peak
+    trade = _make_trade(entry_price=1.00, high_price=2.00)
+    current = 1.65
+    reason = agent._check_exit_conditions(trade, current_price=current)
+    assert reason == "trailing_stop"
+
+
+def test_trailing_stop_does_not_trigger_below_entry():
+    """Trailing stop must not activate when position hasn't gone profitable yet.
+    A flat/loss position should hit the fixed stop-loss, not the trailing stop."""
+    agent = _make_agent(trailing_stop=0.15)
+    # high_price == entry_price means the price never went above entry
+    trade = _make_trade(entry_price=1.00, high_price=1.00)
+    # Price dropped 10% — fixed stop-loss (-8%) should fire, not trailing stop
+    reason = agent._check_exit_conditions(trade, current_price=0.90)
+    assert reason == "stop_loss"
+
+
+def test_trailing_stop_not_triggered_when_still_near_peak():
+    """Only 4% below peak with 15% trailing stop — no exit, still riding."""
+    agent = _make_agent(trailing_stop=0.15)
+    trade = _make_trade(entry_price=1.00, high_price=2.00)
+    current = 2.00 * 0.96   # 4% below peak, comfortably within trail
+    reason = agent._check_exit_conditions(trade, current_price=current)
+    assert reason is None
+
+
+def test_trailing_stop_no_high_price_falls_back_to_entry():
+    """When high_price is None, treat peak as entry — trailing stop not active yet."""
+    agent = _make_agent(trailing_stop=0.15)
+    trade = _make_trade(entry_price=1.00, high_price=None)
+    # Slightly above entry — fixed take-profit not hit, trailing not active
+    reason = agent._check_exit_conditions(trade, current_price=1.05)
+    assert reason is None
+
+
+def test_trailing_stop_fires_clearly_below_trail():
+    """16% below peak with 15% trailing stop — trailing stop fires."""
+    agent = _make_agent(trailing_stop=0.15)
+    trade = _make_trade(entry_price=1.00, high_price=2.00)
+    current = 2.00 * 0.84   # 16% below peak, past 15% trail
+    reason = agent._check_exit_conditions(trade, current_price=current)
+    assert reason == "trailing_stop"
+
+
+def test_fixed_take_profit_fires_when_no_trailing_active():
+    """Fixed take-profit still works when high_price == entry (no runup yet)."""
+    agent = _make_agent(trailing_stop=0.15, take_profit=0.25)
+    # high_price is at entry — no trailing stop active
+    trade = _make_trade(entry_price=1.00, high_price=1.00)
+    reason = agent._check_exit_conditions(trade, current_price=1.30)
+    assert reason == "take_profit"
+
+
+# ── Rug / vetting-failed emergency exit ───────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_emergency_exit_on_honeypot():
+    """Hard rug failure (honeypot) triggers emergency close of open positions."""
+    agent = _make_agent()
+    agent._get_token_id = MagicMock(return_value=1)
+    open_trade = _make_trade(entry_price=1.00)
+    agent._get_open_trades_for_token = MagicMock(return_value=[open_trade])
+    agent._close_trade = AsyncMock()
+
+    payload = {
+        "address": "TokenAddr123",
+        "symbol": "SCAM",
+        "passed": False,
+        "fail_reasons": ["honeypot:goplus"],
+    }
+    await agent._emergency_exit_on_rug(payload)
+    agent._close_trade.assert_awaited_once_with(open_trade, None, "rug_detected")
+
+
+@pytest.mark.asyncio
+async def test_emergency_exit_ignores_soft_failures():
+    """Low liquidity (soft fail) does not trigger emergency close."""
+    agent = _make_agent()
+    agent._get_token_id = MagicMock(return_value=1)
+    agent._get_open_trades_for_token = MagicMock(return_value=[_make_trade(1.00)])
+    agent._close_trade = AsyncMock()
+
+    payload = {
+        "address": "TokenAddr123",
+        "symbol": "LOWLIQ",
+        "passed": False,
+        "fail_reasons": ["low_liquidity:$20000"],
+    }
+    await agent._emergency_exit_on_rug(payload)
+    agent._close_trade.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_emergency_exit_skips_when_no_position_held():
+    """Rug detected but we hold no position — no close attempted."""
+    agent = _make_agent()
+    agent._get_token_id = MagicMock(return_value=1)
+    agent._get_open_trades_for_token = MagicMock(return_value=[])
+    agent._close_trade = AsyncMock()
+
+    payload = {
+        "address": "TokenAddr123",
+        "symbol": "SCAM",
+        "passed": False,
+        "fail_reasons": ["honeypot:goplus"],
+    }
+    await agent._emergency_exit_on_rug(payload)
+    agent._close_trade.assert_not_awaited()

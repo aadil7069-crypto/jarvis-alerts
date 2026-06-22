@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 logger = logging.getLogger("jarvis.circuit_breaker")
@@ -19,7 +19,7 @@ class CircuitBreaker:
     def trigger(self, reason: str) -> None:
         self._triggered = True
         self._reason = reason
-        self._triggered_at = datetime.utcnow()
+        self._triggered_at = datetime.now(timezone.utc)
         logger.critical(f"CIRCUIT BREAKER TRIGGERED — {reason}")
 
     def reset(self, authorized_by: str = "manual") -> None:

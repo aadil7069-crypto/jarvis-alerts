@@ -1,6 +1,23 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from models.schema import Base
+
+# Columns added after initial schema creation — added via ALTER TABLE so existing
+# databases don't lose data on upgrade.
+_MIGRATIONS = [
+    "ALTER TABLE trades ADD COLUMN high_price REAL",
+]
+
+
+def _run_migrations(engine) -> None:
+    with engine.connect() as conn:
+        for stmt in _MIGRATIONS:
+            try:
+                conn.execute(text(stmt))
+                conn.commit()
+            except Exception:
+                # Column already exists — safe to ignore
+                conn.rollback()
 
 
 def init_database(config: dict) -> sessionmaker:
@@ -12,4 +29,5 @@ def init_database(config: dict) -> sessionmaker:
     url = config.get("database", {}).get("url", "sqlite:///jarvis.db")
     engine = create_engine(url, echo=False, connect_args={"check_same_thread": False})
     Base.metadata.create_all(engine)
+    _run_migrations(engine)
     return sessionmaker(bind=engine, autocommit=False, autoflush=False)

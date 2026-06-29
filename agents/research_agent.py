@@ -51,6 +51,7 @@ class ResearchAgent(BaseAgent):
         be_trend = await loop.run_in_executor(None, lambda: birdeye_trending("solana", 20))
         await self._submit(be_trend, "solana", "birdeye_trending", addr_key="address")
 
+        await asyncio.sleep(2)
         await rate_limit("public-api.birdeye.so")
         be_new = await loop.run_in_executor(None, lambda: birdeye_new("solana", 30))
         await self._submit(be_new, "solana", "birdeye_new", addr_key="address")

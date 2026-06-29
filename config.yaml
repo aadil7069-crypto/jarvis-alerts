@@ -59,7 +59,7 @@ maintenance:
 risk:
   daily_loss_limit_pct: 0.05      # Halt trading if daily loss exceeds 5%
   max_drawdown_pct: 0.15          # Circuit breaker triggers at 15% drawdown
-  min_liquidity_usd: 50000        # Reject any token with less than $50k liquidity
+  min_liquidity_usd: 25000        # Reject any token with less than $25k liquidity
 
 chains:
   - solana

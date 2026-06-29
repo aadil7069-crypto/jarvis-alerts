@@ -43,31 +43,34 @@ def _chain(chain: str) -> str:
 def get_smart_money_wallets(chain: str = "sol", limit: int = 50) -> list:
     """
     Fetch the top smart money wallets ranked by 7-day realized profit.
-
-    Returns list of wallet dicts:
-      address, realized_profit, unrealized_profit, win_rate, trade_count,
-      avg_trade_size_usd, wallet_label, last_active_timestamp
+    Tries multiple endpoint patterns since GMGN changes their API frequently.
     """
     c = _chain(chain)
-    try:
-        r = requests.get(
-            f"{_BASE}/smartmoney/{c}/wallets",
-            params={
-                "orderby": "realized_profit",
-                "direction": "desc",
-                "period": "7d",
-                "limit": limit,
-            },
-            headers=_HEADERS,
-            timeout=_TIMEOUT,
-        )
-        r.raise_for_status()
-        data = r.json()
-        wallets = data.get("data", {}).get("wallets") or data.get("data") or []
-        return _parse_wallets(wallets)
-    except Exception as e:
-        logger.error(f"GMGN smart money wallets fetch failed [{chain}]: {e}")
-        return []
+    candidates = [
+        (f"{_BASE}/rank/{c}/wallets/7d", {"orderby": "pnl", "direction": "desc", "limit": limit}),
+        (f"{_BASE}/smartmoney/{c}/wallets", {"orderby": "realized_profit", "direction": "desc", "period": "7d", "limit": limit}),
+        (f"{_BASE}/rank/{c}/wallets/30d", {"orderby": "pnl", "direction": "desc", "limit": limit}),
+    ]
+    for url, params in candidates:
+        try:
+            r = requests.get(url, params=params, headers=_HEADERS, timeout=_TIMEOUT)
+            if r.status_code == 404:
+                continue
+            r.raise_for_status()
+            data = r.json()
+            wallets = (
+                data.get("data", {}).get("wallets")
+                or data.get("data", {}).get("rank")
+                or data.get("data")
+                or []
+            )
+            if wallets:
+                logger.debug(f"GMGN wallet list loaded from {url} ({len(wallets)} wallets)")
+                return _parse_wallets(wallets)
+        except Exception as e:
+            logger.debug(f"GMGN wallet endpoint {url} failed: {e}")
+    logger.warning(f"GMGN smart money wallets unavailable [{chain}] — all endpoints failed")
+    return []
 
 
 def get_token_smart_money_activity(token_address: str, chain: str = "sol", limit: int = 30) -> list:

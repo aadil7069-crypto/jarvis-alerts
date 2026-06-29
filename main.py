@@ -30,7 +30,7 @@ async def _run_agent_safely(agent, logger: logging.Logger) -> None:
     Wrap an agent so its crash is isolated — one failing agent does not
     bring down the rest of the system. Restarts the agent after 30s.
     """
-    while agent.running is not False:
+    while True:
         try:
             await agent.start()
         except asyncio.CancelledError:
@@ -40,9 +40,7 @@ async def _run_agent_safely(agent, logger: logging.Logger) -> None:
                 f"Agent '{agent.name}' crashed: {e} — restarting in 30s",
                 exc_info=True,
             )
-            agent.running = False          # reset so start() re-initialises
             await asyncio.sleep(30)
-            agent.running = True
 
 
 async def main() -> None:

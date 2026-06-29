@@ -101,7 +101,6 @@ def get_token_smart_money_activity(token_address: str, chain: str = "sol", limit
                 return _parse_token_traders(traders)
         except Exception as e:
             logger.debug(f"GMGN top_traders endpoint {url} failed: {e}")
-    logger.debug(f"GMGN top_traders unavailable for {token_address[:12]} — all endpoints failed")
     return []
 
 

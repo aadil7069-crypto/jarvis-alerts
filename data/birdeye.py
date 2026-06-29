@@ -45,6 +45,12 @@ def _get(path: str, params: dict = None, chain: str = "solana") -> dict | None:
             headers=_headers(chain),
             timeout=_TIMEOUT,
         )
+        if r.status_code == 404:
+            logger.debug(f"Birdeye endpoint not found [{path}] — skipping")
+            return None
+        if r.status_code == 429:
+            logger.warning(f"Birdeye rate-limited [{path}] — will retry next cycle")
+            return None
         r.raise_for_status()
         return r.json()
     except Exception as e:

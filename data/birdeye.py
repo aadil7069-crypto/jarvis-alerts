@@ -109,9 +109,12 @@ def get_trending_tokens(chain: str = "solana", limit: int = 20) -> list:
     )
     if not data:
         return []
-    tokens = (data.get("data") or {}).get("items") or data.get("data") or []
+    raw = data.get("data") or {}
+    tokens = raw.get("items") or raw.get("tokens") or (raw if isinstance(raw, list) else [])
     result = []
     for t in tokens:
+        if not isinstance(t, dict):
+            continue
         addr = t.get("address")
         if not addr:
             continue

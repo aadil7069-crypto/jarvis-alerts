@@ -76,32 +76,33 @@ def get_smart_money_wallets(chain: str = "sol", limit: int = 50) -> list:
 def get_token_smart_money_activity(token_address: str, chain: str = "sol", limit: int = 30) -> list:
     """
     For a given token, return recent buys from smart money wallets.
-
-    This is the core signal: smart money actively buying a specific token on our watchlist.
-
-    Returns list of buy dicts:
-      wallet_address, wallet_label, amount_usd, timestamp, tx_signature, profit_1d
+    Tries multiple endpoint/param combos since GMGN shuffles their API frequently.
     """
     c = _chain(chain)
-    try:
-        r = requests.get(
-            f"{_BASE}/tokens/{c}/{token_address}/top_traders",
-            params={
-                "orderby": "profit",
-                "direction": "desc",
-                "limit": limit,
-                "tag[]": ["smart_degen", "kol"],
-            },
-            headers=_HEADERS,
-            timeout=_TIMEOUT,
-        )
-        r.raise_for_status()
-        data = r.json()
-        traders = data.get("data") or []
-        return _parse_token_traders(traders)
-    except Exception as e:
-        logger.error(f"GMGN token smart money activity failed [{token_address[:12]}]: {e}")
-        return []
+    candidates = [
+        (f"{_BASE}/tokens/{c}/{token_address}/top_traders",
+         {"orderby": "profit", "direction": "desc", "limit": limit}),
+        (f"{_BASE}/tokens/{c}/{token_address}/traders",
+         {"orderby": "profit", "direction": "desc", "limit": limit}),
+        (f"{_BASE}/token/{c}/top_traders/{token_address}",
+         {"limit": limit}),
+    ]
+    for url, params in candidates:
+        try:
+            r = requests.get(url, params=params, headers=_HEADERS, timeout=_TIMEOUT)
+            if r.status_code == 404:
+                continue
+            r.raise_for_status()
+            data = r.json()
+            traders = data.get("data") or []
+            if isinstance(traders, dict):
+                traders = traders.get("traders") or traders.get("items") or []
+            if traders:
+                return _parse_token_traders(traders)
+        except Exception as e:
+            logger.debug(f"GMGN top_traders endpoint {url} failed: {e}")
+    logger.debug(f"GMGN top_traders unavailable for {token_address[:12]} — all endpoints failed")
+    return []
 
 
 def get_wallet_stats(address: str, chain: str = "sol", period: str = "7d") -> dict:

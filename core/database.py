@@ -31,4 +31,4 @@ def init_database(config: dict) -> sessionmaker:
     engine = create_engine(url, echo=False, connect_args={"check_same_thread": False})
     Base.metadata.create_all(engine)
     _run_migrations(engine)
-    return sessionmaker(bind=engine, autocommit=False, autoflush=False)
+    return sessionmaker(bind=engine, autocommit=False, autoflush=False, expire_on_commit=False)

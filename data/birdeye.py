@@ -130,32 +130,36 @@ def get_trending_tokens(chain: str = "solana", limit: int = 20) -> list:
 
 def get_new_listings(chain: str = "solana", limit: int = 30) -> list:
     """
-    Fetch newly listed tokens. Birdeye's new listing API is faster than
-    DexScreener for Solana because Birdeye indexes directly from the DEX
-    program events.
+    Fetch newly listed tokens. Tries multiple endpoint patterns since Birdeye
+    renames endpoints between API versions.
     """
-    data = _get(
-        "/defi/new_listing",
-        params={"limit": limit},
-        chain=chain,
-    )
-    if not data:
-        return []
-    tokens = data.get("data") or []
-    result = []
-    for t in tokens:
-        addr = t.get("address")
-        if not addr:
+    for path in ("/defi/v3/token/new-listing", "/defi/new_listing"):
+        data = _get(path, params={"limit": limit, "meme_platform_enabled": True}, chain=chain)
+        if data is None:
             continue
-        result.append({
-            "address": addr,
-            "symbol": t.get("symbol") or "",
-            "name": t.get("name") or "",
-            "listed_at": t.get("listTime") or t.get("list_time"),
-            "liquidity": _safe_float(t.get("liquidity")),
-            "price_usd": _safe_float(t.get("price")),
-        })
-    return result
+        tokens = (data.get("data") or {})
+        if isinstance(tokens, dict):
+            tokens = tokens.get("items") or tokens.get("tokens") or []
+        if not isinstance(tokens, list):
+            tokens = []
+        if not tokens:
+            continue
+        result = []
+        for t in tokens:
+            addr = t.get("address")
+            if not addr:
+                continue
+            result.append({
+                "address": addr,
+                "symbol": t.get("symbol") or "",
+                "name": t.get("name") or "",
+                "listed_at": t.get("listTime") or t.get("list_time"),
+                "liquidity": _safe_float(t.get("liquidity")),
+                "price_usd": _safe_float(t.get("price")),
+            })
+        if result:
+            return result
+    return []
 
 
 def get_token_security(address: str, chain: str = "solana") -> dict:

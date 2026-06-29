@@ -19,18 +19,18 @@ class Orchestrator(BaseAgent):
     Only paper trades — never touches real funds (mode enforced in config).
     """
 
-    MIN_CONFIDENCE: int = 72     # minimum score to create a trade idea
-    MIN_AGENTS: int = 3          # minimum distinct agents that must agree
-
     def __init__(self, name, message_bus, session_factory, circuit_breaker, config):
         super().__init__(name, message_bus, session_factory, config)
         self.circuit_breaker = circuit_breaker
+        trading = config.get("trading", {})
+        self.MIN_CONFIDENCE: int = trading.get("min_confidence_score", 72)
+        self.MIN_AGENTS: int = trading.get("min_agents_consensus", 3)
         self._confidence_modifier: int = 0     # from prediction market agent
         self._safe_mode: str = "normal"        # from prediction market agent
         self._position_multiplier: float = 1.0 # from prediction market safe-mode
         self._regime: str = "unknown"          # from regime agent
         self._regime_multiplier: float = 0.7   # conservative until first regime update
-        self._max_positions: int = config.get("trading", {}).get("max_concurrent_positions", 5)
+        self._max_positions: int = trading.get("max_concurrent_positions", 5)
 
     # ── Tick ──────────────────────────────────────────────────────────────────
 

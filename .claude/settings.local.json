@@ -5,7 +5,11 @@
       "PowerShell($env:PATH += \";C:\\\\Program Files\\\\Git\\\\cmd\"; cd C:\\\\Users\\\\aadil\\\\jarvis-alerts; git status)",
       "PowerShell(git *)",
       "PowerShell($env:PATH += \";C:\\\\Program Files\\\\Git\\\\cmd\"; cd C:\\\\Users\\\\aadil\\\\jarvis-alerts; git remote -v)",
-      "PowerShell($env:PATH += \";C:\\\\Program Files\\\\Git\\\\cmd\"; cd C:\\\\Users\\\\aadil\\\\jarvis-alerts; python -m pytest tests/ -v --tb=short 2>&1 | Select-Object -Last 60)"
+      "PowerShell($env:PATH += \";C:\\\\Program Files\\\\Git\\\\cmd\"; cd C:\\\\Users\\\\aadil\\\\jarvis-alerts; python -m pytest tests/ -v --tb=short 2>&1 | Select-Object -Last 60)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git config *)",
+      "Bash(python -m pytest tests/ -k \"rate_limit or execution\" -q)"
     ]
   }
 }

@@ -68,7 +68,7 @@ class ExecutionAgent(BaseAgent):
             if not address:
                 continue
 
-            await rate_limit("api.dexscreener.com")
+            await rate_limit("api.dexscreener.com", priority=True)
             pair = await loop.run_in_executor(None, lambda a=address: get_token(a))
             current_price = extract_token_info(pair).get("price_usd") if pair else None
 

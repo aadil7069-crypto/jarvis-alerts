@@ -20,6 +20,7 @@ trading:
   take_profit_pct: 0.25           # Close position at +25% gain
   trailing_stop_pct: 0.15         # Trail 15% below peak price once position is profitable
   max_hold_hours: 48              # Auto-close any position after 48 hours
+  stop_loss_cooldown_minutes: 30  # Don't re-enter a token this soon after it stopped us out (avoids chop whipsaw)
 
 intelligence:
   # GMGN smart money discovery

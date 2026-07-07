@@ -9,7 +9,9 @@
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
       "Bash(git config *)",
-      "Bash(python -m pytest tests/ -k \"rate_limit or execution\" -q)"
+      "Bash(python -m pytest tests/ -k \"rate_limit or execution\" -q)",
+      "Bash(git push *)",
+      "Bash(python -m pytest tests/ -q)"
     ]
   }
 }

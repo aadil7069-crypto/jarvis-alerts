@@ -13,11 +13,13 @@ Why BTC? BTC dominance means its trend and volatility regime predicts
 memecoin behaviour more reliably than any individual token's chart.
 """
 import asyncio
+from datetime import datetime, timezone
 
 from agents.base_agent import BaseAgent
 from core.rate_limiter import acquire as rate_limit
 from core.regime import detect_regime, regime_position_multiplier
 from data.price_feeds import get_btc_ohlcv
+from models.schema import Signal
 
 
 class RegimeAgent(BaseAgent):
@@ -56,6 +58,8 @@ class RegimeAgent(BaseAgent):
                 f"momentum={result['momentum']:+.2%}"
             )
 
+        self._store_regime_signal(regime, multiplier)
+
         await self.publish("regime_update", {
             "regime": regime,
             "position_multiplier": multiplier,
@@ -64,6 +68,25 @@ class RegimeAgent(BaseAgent):
             "momentum": result["momentum"],
             "atr_pct": result["atr_pct"],
         })
+
+    def _store_regime_signal(self, regime: str, multiplier: float) -> None:
+        """Persist regime as a global Signal (token_id=None) so the dashboard can read it."""
+        signal_type = {
+            "trending_up": "bullish",
+            "trending_down": "bearish",
+        }.get(regime, "neutral")
+        try:
+            with self.get_db() as db:
+                db.add(Signal(
+                    token_id=None,
+                    agent_name="regime",
+                    signal_type=signal_type,
+                    strength=multiplier * 100,
+                    reason=regime,
+                    created_at=datetime.now(timezone.utc),
+                ))
+        except Exception as e:
+            self.logger.error(f"Failed to store regime signal: {e}")
 
     async def process_message(self, message: dict) -> None:
         pass

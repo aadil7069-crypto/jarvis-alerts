@@ -41,6 +41,9 @@ class ExecutionAgent(BaseAgent):
         self._max_hold_hours    = trading.get("max_hold_hours", 48)
         self._starting_balance  = trading.get("paper_balance", 10_000.0)
         self._max_position_pct  = trading.get("max_position_size_pct", 0.05)
+        self._stop_loss_cooldown = timedelta(
+            minutes=trading.get("stop_loss_cooldown_minutes", 30)
+        )
         execution = config.get("execution", {})
         self._slippage_bps = execution.get("slippage_bps", 50)
         self._solana_rpc   = (
@@ -95,6 +98,14 @@ class ExecutionAgent(BaseAgent):
 
         if self._has_open_position(token_id):
             self.logger.info(f"Already holding {symbol} — duplicate position blocked")
+            return
+
+        cooldown_remaining = self._stop_loss_cooldown_remaining(token_id)
+        if cooldown_remaining:
+            self.logger.info(
+                f"{symbol} stopped out recently — cooldown blocks re-entry for "
+                f"{cooldown_remaining.total_seconds() / 60:.0f} more min"
+            )
             return
 
         size_usd = self._compute_position_size(idea)
@@ -362,6 +373,30 @@ class ExecutionAgent(BaseAgent):
                 ) > 0
         except Exception:
             return False
+
+    def _stop_loss_cooldown_remaining(self, token_id: int) -> timedelta | None:
+        """If this token stopped us out within the cooldown window, return time left."""
+        try:
+            with self.get_db() as db:
+                last_stop_out = (
+                    db.query(Trade)
+                    .filter_by(token_id=token_id, status="closed", exit_reason="stop_loss", is_paper=True)
+                    .order_by(Trade.closed_at.desc())
+                    .first()
+                )
+                if not last_stop_out or not last_stop_out.closed_at:
+                    return None
+
+                closed_at = last_stop_out.closed_at
+                if closed_at.tzinfo is None:
+                    closed_at = closed_at.replace(tzinfo=timezone.utc)
+
+                elapsed = datetime.now(timezone.utc) - closed_at
+                if elapsed < self._stop_loss_cooldown:
+                    return self._stop_loss_cooldown - elapsed
+                return None
+        except Exception:
+            return None
 
     def _get_open_trades(self) -> list:
         try:

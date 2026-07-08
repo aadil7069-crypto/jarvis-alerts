@@ -32,7 +32,10 @@ def _make_trade(
     return trade
 
 
-def _make_agent(stop_loss=-0.08, take_profit=0.25, max_hold_hours=48, trailing_stop=0.15) -> ExecutionAgent:
+def _make_agent(
+    stop_loss=-0.08, take_profit=0.25, max_hold_hours=48, trailing_stop=0.15,
+    stop_loss_grace_minutes=0, min_position_liquidity=3000,
+) -> ExecutionAgent:
     cb = MagicMock()
     cb.trading_allowed = True
     bus = MagicMock()
@@ -62,6 +65,8 @@ def _make_agent(stop_loss=-0.08, take_profit=0.25, max_hold_hours=48, trailing_s
     agent._max_hold_hours = max_hold_hours
     agent._starting_balance = 10_000.0
     agent._max_position_pct = 0.05
+    agent._stop_loss_grace = timedelta(minutes=stop_loss_grace_minutes)
+    agent._min_position_liquidity = min_position_liquidity
     return agent
 
 
@@ -86,6 +91,50 @@ def test_exit_stop_loss_not_triggered():
     agent = _make_agent()
     trade = _make_trade(entry_price=1.00)
     reason = agent._check_exit_conditions(trade, current_price=0.95)
+    assert reason is None
+
+
+def test_exit_stop_loss_suppressed_during_grace_period():
+    agent = _make_agent(stop_loss_grace_minutes=5)
+    trade = _make_trade(entry_price=1.00, opened_hours_ago=0.01)  # ~36s ago
+    reason = agent._check_exit_conditions(trade, current_price=0.80)
+    assert reason is None
+
+
+def test_exit_stop_loss_fires_once_grace_period_elapses():
+    agent = _make_agent(stop_loss_grace_minutes=5)
+    trade = _make_trade(entry_price=1.00, opened_hours_ago=1.0)
+    reason = agent._check_exit_conditions(trade, current_price=0.80)
+    assert reason == "stop_loss"
+
+
+# ── Exit conditions: liquidity collapse ────────────────────────────────────────
+
+def test_exit_liquidity_collapse_triggers_even_at_profit():
+    agent = _make_agent(min_position_liquidity=3000)
+    trade = _make_trade(entry_price=1.00)
+    reason = agent._check_exit_conditions(trade, current_price=1.10, current_liquidity=500)
+    assert reason == "liquidity_collapse"
+
+
+def test_exit_liquidity_collapse_ignores_grace_period():
+    agent = _make_agent(min_position_liquidity=3000, stop_loss_grace_minutes=5)
+    trade = _make_trade(entry_price=1.00, opened_hours_ago=0.01)
+    reason = agent._check_exit_conditions(trade, current_price=1.00, current_liquidity=100)
+    assert reason == "liquidity_collapse"
+
+
+def test_exit_liquidity_healthy_does_not_trigger():
+    agent = _make_agent(min_position_liquidity=3000)
+    trade = _make_trade(entry_price=1.00)
+    reason = agent._check_exit_conditions(trade, current_price=1.00, current_liquidity=50_000)
+    assert reason is None
+
+
+def test_exit_liquidity_unknown_does_not_trigger():
+    agent = _make_agent(min_position_liquidity=3000)
+    trade = _make_trade(entry_price=1.00)
+    reason = agent._check_exit_conditions(trade, current_price=1.00, current_liquidity=None)
     assert reason is None
 
 

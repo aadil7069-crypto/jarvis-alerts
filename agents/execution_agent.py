@@ -18,7 +18,8 @@ class ExecutionAgent(BaseAgent):
     Paper mode  (mode == "paper"):
       Opening  — fetch quote price from Jupiter/PancakeSwap (with price impact),
                  fall back to DexScreener; create Trade record; publish trade_opened
-      Monitoring — check stop-loss / trailing-stop / take-profit / timeout each tick
+      Monitoring — check stop-loss / trailing-stop / take-profit / timeout /
+                   liquidity-collapse each tick
 
     Live mode (mode == "live"):
       Opening  — same quote fetch, then broadcast swap on-chain via Jupiter/PancakeSwap;
@@ -43,6 +44,12 @@ class ExecutionAgent(BaseAgent):
         self._max_position_pct  = trading.get("max_position_size_pct", 0.05)
         self._stop_loss_cooldown = timedelta(
             minutes=trading.get("stop_loss_cooldown_minutes", 30)
+        )
+        self._stop_loss_grace = timedelta(
+            minutes=trading.get("stop_loss_grace_minutes", 5)
+        )
+        self._min_position_liquidity = config.get("risk", {}).get(
+            "min_position_liquidity_usd", 3000
         )
         execution = config.get("execution", {})
         self._slippage_bps = execution.get("slippage_bps", 50)
@@ -73,12 +80,14 @@ class ExecutionAgent(BaseAgent):
 
             await rate_limit("api.dexscreener.com", priority=True)
             pair = await loop.run_in_executor(None, lambda a=address: get_token(a))
-            current_price = extract_token_info(pair).get("price_usd") if pair else None
+            info = extract_token_info(pair) if pair else {}
+            current_price = info.get("price_usd")
+            current_liquidity = info.get("liquidity_usd") if pair else None
 
             if current_price and current_price > 0:
                 self._update_high_price(trade, current_price)
 
-            reason = self._check_exit_conditions(trade, current_price)
+            reason = self._check_exit_conditions(trade, current_price, current_liquidity)
             if reason:
                 await self._close_trade(trade, current_price, reason)
 
@@ -309,13 +318,22 @@ class ExecutionAgent(BaseAgent):
 
     # ── Exit condition logic ──────────────────────────────────────────────────
 
-    def _check_exit_conditions(self, trade: Trade, current_price: float | None) -> str | None:
+    def _check_exit_conditions(
+        self, trade: Trade, current_price: float | None, current_liquidity: float | None = None
+    ) -> str | None:
+        opened = None
         if trade.opened_at:
             opened = trade.opened_at
             if opened.tzinfo is None:
                 opened = opened.replace(tzinfo=timezone.utc)
             if datetime.now(timezone.utc) - opened > timedelta(hours=self._max_hold_hours):
                 return "timeout"
+
+        # Liquidity collapse = rug in progress. Checked before everything else and
+        # never suppressed by the grace period — a pool can be drained in the first
+        # minute, and price data lags a liquidity pull, not the other way around.
+        if current_liquidity is not None and current_liquidity < self._min_position_liquidity:
+            return "liquidity_collapse"
 
         if current_price is None or trade.entry_price is None:
             return None
@@ -324,7 +342,14 @@ class ExecutionAgent(BaseAgent):
         if trade.direction == "sell":
             pnl_pct = -pnl_pct
 
-        if pnl_pct <= self._stop_loss_pct:
+        # Skip stop-loss during the grace window right after entry — thin-liquidity
+        # memecoins commonly wobble sharply in the first few minutes on noise alone,
+        # not a real reversal.
+        in_grace_period = (
+            opened is not None
+            and datetime.now(timezone.utc) - opened < self._stop_loss_grace
+        )
+        if pnl_pct <= self._stop_loss_pct and not in_grace_period:
             return "stop_loss"
 
         # Once the trade has gone profitable the trailing stop takes over from

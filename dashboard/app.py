@@ -147,6 +147,8 @@ _DASHBOARD_HTML = """<!DOCTYPE html>
   .exit-trailing_stop{background:var(--blue-dim);color:var(--blue)}
   .exit-timeout{background:var(--yellow-dim);color:var(--yellow)}
   .exit-manual{background:var(--purple-dim);color:var(--purple)}
+  .exit-liquidity_collapse{background:var(--red-dim);color:var(--red);border:1px solid var(--red)}
+  .exit-rug_detected{background:var(--red-dim);color:var(--red);border:1px solid var(--red)}
 
   /* ── Signal feed ── */
   .signal-item{padding:10px 16px;border-bottom:1px solid var(--border);transition:background .15s}

@@ -59,10 +59,14 @@ class Orchestrator(BaseAgent):
             return
 
         slots_available = self._max_positions - open_count
+        held_token_ids = self._held_token_ids()
 
         for token in watchlist:
             if slots_available <= 0:
                 break
+
+            if token.id in held_token_ids:
+                continue
 
             scored = self._score_token(token)
             if not scored:
@@ -223,6 +227,15 @@ class Orchestrator(BaseAgent):
         except Exception as e:
             self.logger.error(f"Failed to count open positions: {e}")
             return 0
+
+    def _held_token_ids(self) -> set:
+        try:
+            with self.get_db() as db:
+                rows = db.query(Trade.token_id).filter_by(status="open", is_paper=True).all()
+                return {r[0] for r in rows}
+        except Exception as e:
+            self.logger.error(f"Failed to load held token ids: {e}")
+            return set()
 
     # ── Message handling ──────────────────────────────────────────────────────
 

@@ -16,11 +16,12 @@ trading:
   min_confidence_score: 25        # Minimum score (0-100) to execute a trade
   min_agents_consensus: 1         # Minimum agents that must agree before a trade
   max_concurrent_positions: 5     # Never hold more than this many open positions
-  stop_loss_pct: -0.08            # Close position at -8% loss (fixed, from entry)
+  stop_loss_pct: -0.12            # Close position at -12% loss (fixed, from entry)
   take_profit_pct: 0.25           # Close position at +25% gain
   trailing_stop_pct: 0.15         # Trail 15% below peak price once position is profitable
   max_hold_hours: 48              # Auto-close any position after 48 hours
   stop_loss_cooldown_minutes: 30  # Don't re-enter a token this soon after it stopped us out (avoids chop whipsaw)
+  stop_loss_grace_minutes: 5      # Don't let stop-loss fire in the first few minutes (avoids entry-wick noise)
 
 intelligence:
   # GMGN smart money discovery
@@ -61,6 +62,7 @@ risk:
   daily_loss_limit_pct: 0.05      # Halt trading if daily loss exceeds 5%
   max_drawdown_pct: 0.15          # Circuit breaker triggers at 15% drawdown
   min_liquidity_usd: 25000        # Reject any token with less than $25k liquidity
+  min_position_liquidity_usd: 3000  # Emergency-exit an OPEN position if liquidity collapses below this (rug in progress)
 
 chains:
   - solana

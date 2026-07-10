@@ -8,7 +8,7 @@ from data.jupiter import get_quote as jupiter_quote, execute_swap as jupiter_exe
 from data.jupiter import USDC_MINT as _USDC_MINT
 from data.pancakeswap import get_quote as pancake_quote, execute_swap as pancake_execute
 from data.pancakeswap import WBNB_ADDRESS as _WBNB
-from models.schema import Trade, TradeIdea, Token, PaperPortfolio
+from models.schema import Trade, TradeIdea, Token, PaperPortfolio, Watchlist
 
 
 class ExecutionAgent(BaseAgent):
@@ -276,6 +276,14 @@ class ExecutionAgent(BaseAgent):
                 t.status = "closed"
                 t.closed_at = now
                 t.exit_reason = reason
+
+                # A confirmed rug/liquidity collapse means the token is dead — remove it
+                # from the watchlist so it can never be re-signaled and re-bought again
+                # (a cooldown alone isn't enough; nothing about a dead pool "recovers").
+                if reason in ("liquidity_collapse", "rug_detected"):
+                    db.query(Watchlist).filter_by(token_id=trade.token_id, status="watching").update(
+                        {"status": "rejected"}
+                    )
         except Exception as e:
             self.logger.error(f"Failed to close trade {trade.id}: {e}")
             return
@@ -405,7 +413,12 @@ class ExecutionAgent(BaseAgent):
             with self.get_db() as db:
                 last_stop_out = (
                     db.query(Trade)
-                    .filter_by(token_id=token_id, status="closed", exit_reason="stop_loss", is_paper=True)
+                    .filter(
+                        Trade.token_id == token_id,
+                        Trade.status == "closed",
+                        Trade.exit_reason.in_(["stop_loss", "liquidity_collapse", "rug_detected"]),
+                        Trade.is_paper == True,  # noqa: E712
+                    )
                     .order_by(Trade.closed_at.desc())
                     .first()
                 )

@@ -207,6 +207,14 @@ def test_momentum_missing_fields():
     assert 0.0 <= strength <= 1.0
 
 
+def test_momentum_zero_volume_is_rejected_despite_huge_price_swing():
+    """A near-dead pool can show wild nominal % swings on a single dust trade —
+    that's noise, not momentum, and must not pass the threshold."""
+    info = {"price_change_1h": 392, "volume_24h": 0, "buys_24h": 5, "sells_24h": 0}
+    strength = _momentum_strength(info)
+    assert strength == 0.0
+
+
 # ── Orchestrator gate logic (unit-level) ──────────────────────────────────────
 
 def test_meets_threshold_pass():

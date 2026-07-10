@@ -6,6 +6,9 @@ from data.dexscreener import get_token, extract_token_info
 from models.schema import Token, Watchlist, Signal
 
 
+_MIN_VOLUME_USD = 1000  # Below this, price-change % is noise on a near-dead pool, not momentum
+
+
 def _momentum_strength(info: dict) -> float:
     """
     Score token momentum 0.0–1.0 from DexScreener data.
@@ -15,6 +18,11 @@ def _momentum_strength(info: dict) -> float:
       - 24h volume (30%):      sufficient liquidity
       - Buy/sell ratio (30%):  net buying pressure
     """
+    # A near-zero-volume pool can show huge nominal price swings from a single
+    # dust trade — that's not momentum, it's noise. Reject outright.
+    if (info.get("volume_24h") or 0) < _MIN_VOLUME_USD:
+        return 0.0
+
     score = 0.0
 
     # Price change last hour (up to 0.40)

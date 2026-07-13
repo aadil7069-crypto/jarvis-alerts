@@ -82,7 +82,7 @@ agents:
   smart_money:
     interval_seconds: 120
   elite_trader:
-    interval_seconds: 180
+    interval_seconds: 900  # throttled — Birdeye free-tier CU quota was exhausting mid-month
   sentiment:
     interval_seconds: 300
   risk:

@@ -25,6 +25,7 @@ class Orchestrator(BaseAgent):
         trading = config.get("trading", {})
         self.MIN_CONFIDENCE: int = trading.get("min_confidence_score", 72)
         self.MIN_AGENTS: int = trading.get("min_agents_consensus", 3)
+        self._regime_confidence_boost: dict = trading.get("regime_confidence_boost", {})
         self._confidence_modifier: int = 0     # from prediction market agent
         self._safe_mode: str = "normal"        # from prediction market agent
         self._position_multiplier: float = 1.0 # from prediction market safe-mode
@@ -78,7 +79,8 @@ class Orchestrator(BaseAgent):
             else:
                 self.logger.debug(
                     f"{token.symbol or token.address[:8]} | score={scored['total']} < "
-                    f"{self.MIN_CONFIDENCE} threshold or < {self.MIN_AGENTS} agents"
+                    f"{scored['effective_min_confidence']} threshold (regime-adjusted) "
+                    f"or < {self.MIN_AGENTS} agents"
                 )
 
     # ── Scoring ───────────────────────────────────────────────────────────────
@@ -143,11 +145,15 @@ class Orchestrator(BaseAgent):
             }
             agent_count = len(bullish_agents)
 
+            effective_min_confidence = self.MIN_CONFIDENCE + self._regime_confidence_boost.get(
+                self._regime, 0
+            )
             result["meets_threshold"] = (
-                result["total"] >= self.MIN_CONFIDENCE
+                result["total"] >= effective_min_confidence
                 and agent_count >= self.MIN_AGENTS
             )
             result["agents_bullish"] = agent_count
+            result["effective_min_confidence"] = effective_min_confidence
 
             return result
 

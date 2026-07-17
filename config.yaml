@@ -23,6 +23,17 @@ trading:
   stop_loss_cooldown_minutes: 30  # Don't re-enter a token this soon after it stopped us out (avoids chop whipsaw)
   stop_loss_grace_minutes: 5      # Don't let stop-loss fire in the first few minutes (avoids entry-wick noise)
 
+  # Regime only throttled position SIZE (core/regime.py), not trade FREQUENCY —
+  # so the bot took just as many trades in chop as in a trend, only smaller.
+  # These add to min_confidence_score per regime to raise the bar when the
+  # odds are already stacked against a trend-following approach.
+  regime_confidence_boost:
+    trending_up: 0
+    ranging: 10
+    volatile: 15
+    trending_down: 20
+    unknown: 10
+
 intelligence:
   # GMGN smart money discovery
   gmgn_enabled: true
